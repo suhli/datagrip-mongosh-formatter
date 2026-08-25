@@ -5,19 +5,28 @@
       "label": "runIde (debug)",
       "type": "shell",
       "command": "./gradlew",
-      "windows": {
-        "command": ".\\gradlew.bat"
-      },
       "args": [
         "runIde",
         "-PdebugIde=true",
         "--console=plain"
       ],
       "options": {
-        "cwd": "${workspaceFolder}",
-        "env": {
-          "JAVA_HOME": "${env:JAVA_HOME}"
-        }
+        "cwd": "${workspaceFolder}"
+      },
+      "windows": {
+        "options": {
+          "shell": {
+            "executable": "powershell.exe",
+            "args": [
+              "-NoLogo",
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File"
+            ]
+          }
+        },
+        "command": "${workspaceFolder}\\.vscode\\run-ide-debug.ps1"
       },
       "isBackground": true,
       "problemMatcher": {

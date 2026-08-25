@@ -1,0 +1,13 @@
+<ivy-module version="2.0">
+  <info organisation="bundledModule" module="intellij.grid.scripting.impl" revision="IU-252.28238.7"/>
+  <configurations>
+    <conf name="default" visibility="public"/>
+  </configurations>
+  <publications/>
+  <dependencies>
+    <dependency org="bundledModule" name="intellij.grid.scripting.rt" rev="IU-252.28238.7"/>
+    <dependency org="bundledModule" name="intellij.grid.core.impl" rev="IU-252.28238.7"/>
+    <dependency org="bundledModule" name="intellij.grid.csv.core.impl" rev="IU-252.28238.7"/>
+    <dependency org="bundledModule" name="intellij.grid.impl" rev="IU-252.28238.7"/>
+  </dependencies>
+</ivy-module>

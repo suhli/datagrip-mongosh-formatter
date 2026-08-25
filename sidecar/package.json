@@ -1,0 +1,18 @@
+{
+  "name": "mongosh-formatter-sidecar",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Build-time package for the QuickJS MongoJS formatter sidecar. Not a runtime dependency of the JetBrains plugin.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node scripts/test.mjs",
+    "package-native": "node scripts/package-native.mjs"
+  },
+  "dependencies": {
+    "prettier": "3.9.6"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.9"
+  }
+}

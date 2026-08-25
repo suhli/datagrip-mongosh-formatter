@@ -1,0 +1,40 @@
+{
+  "protocolVersion": 1,
+  "prettier": "3.9.6",
+  "quickjs": {
+    "distribution": "quickjs-ng",
+    "version": "0.16.2",
+    "reason": "Pinned QuickJS-ng (QuickJS family) because Prettier Standalone 3.9 needs a more complete ES runtime than Bellard QuickJS. The Kotlin backend talks to any stdin/stdout sidecar, so this runtime can be replaced later.",
+    "releaseBaseUrl": "https://github.com/quickjs-ng/quickjs/releases/download/v0.16.2",
+    "binaries": {
+      "windows-x64": {
+        "file": "qjs-windows-x86_64.exe",
+        "executable": "mongosh-formatter.exe",
+        "sha256": "7b27412de844403545bd151fbe49191b4d5b91a9e15b5db7c863fea54639a82b"
+      },
+      "linux-x64": {
+        "file": "qjs-linux-x86_64",
+        "executable": "mongosh-formatter"
+      },
+      "linux-aarch64": {
+        "file": "qjs-linux-aarch64",
+        "executable": "mongosh-formatter"
+      },
+      "macos-x64": {
+        "file": "qjs-darwin-x86_64",
+        "executable": "mongosh-formatter"
+      },
+      "macos-aarch64": {
+        "file": "qjs-darwin-arm64",
+        "executable": "mongosh-formatter"
+      }
+    },
+    "qjsc": {
+      "windows-x64": { "file": "qjsc-windows-x86_64.exe", "sha256": "3aed39cd46fea7aefc05970649fa154085356031a91d9c1f2dcf1b07af35ad9c" },
+      "linux-x64": { "file": "qjsc-linux-x86_64" },
+      "linux-aarch64": { "file": "qjsc-linux-aarch64" },
+      "macos-x64": { "file": "qjsc-darwin-x86_64" },
+      "macos-aarch64": { "file": "qjsc-darwin-arm64" }
+    }
+  }
+}

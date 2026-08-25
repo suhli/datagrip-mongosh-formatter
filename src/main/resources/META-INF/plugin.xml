@@ -1,42 +1,33 @@
 <!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
-    <!-- Unique identifier of the plugin. It should be FQN. It cannot be changed between the plugin versions. -->
     <id>com.suhli.datagrip-plugin-format-mongojs-prettier</id>
-
-    <!-- Public plugin name should be written in Title Case.
-         Guidelines: https://plugins.jetbrains.com/docs/marketplace/plugin-overview-page.html#plugin-name -->
     <name>MongoJS Prettier Format</name>
+    <vendor email="admin@shuhangli.com" url="https://github.com/suhli">suhli</vendor>
 
-    <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
-     <vendor email="admin@shuhangli.com" url="https://github.com/suhli">suhli</vendor>
-
-    <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
-         Simple HTML elements (text formatting, paragraphs, and lists) can be added inside of <![CDATA[ ]]> tag.
-         Guidelines: https://plugins.jetbrains.com/docs/marketplace/plugin-overview-page.html#plugin-description -->
     <description><![CDATA[
-    <div>datagrip plugin to format mongojs or sql in playground/console base on <a href="https://plugins.jetbrains.com/plugin/10456-prettier">prettier plugin</a></div>
+    <div>Formats MongoDB / MongoJS Console code in DataGrip using a bundled QuickJS sidecar and Prettier Standalone.</div>
+    <div>No Node.js, npm, JetBrains JavaScript plugin, or JetBrains Prettier plugin is required at runtime.</div>
 
-    <h1> Features </h1>
-
-    <div>* format mongojs</div>
-    <div>* format sql in mongo console</div>
-
-    <h1> Requirement </h1>
-
-    <div><a href="https://plugins.jetbrains.com/plugin/10456-prettier">prettier plugin</a></div>
+    <h1>Features</h1>
+    <ul>
+      <li>Reformat Code / Ctrl+Alt+L on MongoJS consoles and files</li>
+      <li>Whole-document formatting</li>
+      <li>Selection / range formatting via Prettier</li>
+      <li>Keeps the original document unchanged when formatting fails</li>
+    </ul>
   ]]></description>
 
-    <!-- Product and plugin compatibility requirements.
-         Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
-    <depends>com.intellij.database</depends>
     <depends>com.intellij.modules.platform</depends>
-    <depends>JavaScript</depends>
-    <depends>intellij.prettierJS</depends>
+    <depends>com.intellij.database</depends>
 
-    <!-- Extension points defined by the plugin.
-         Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
-        <postFormatProcessor implementation="com.suhli.Format"/>
+        <formattingService implementation="com.suhli.mongosh.MongoJsFormattingService"/>
         <notificationGroup displayType="BALLOON" id="MongoJS Format"/>
+        <applicationService serviceImplementation="com.suhli.mongosh.settings.MongoJsFormatterSettings"/>
+        <applicationConfigurable
+            parentId="tools"
+            instance="com.suhli.mongosh.settings.MongoJsFormatterConfigurable"
+            id="com.suhli.mongosh.settings"
+            displayName="MongoJS Formatter"/>
     </extensions>
 </idea-plugin>

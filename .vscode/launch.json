@@ -1,0 +1,22 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug Plugin in IDEA",
+      "type": "java",
+      "request": "attach",
+      "hostName": "localhost",
+      "port": 5005,
+      "timeout": 600000,
+      "preLaunchTask": "runIde (debug)"
+    },
+    {
+      "name": "Attach to runIde",
+      "type": "java",
+      "request": "attach",
+      "hostName": "localhost",
+      "port": 5005,
+      "timeout": 60000
+    }
+  ]
+}

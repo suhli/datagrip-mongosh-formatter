@@ -4,6 +4,8 @@ DataGrip plugin that formats MongoDB / MongoJS Console code through a bundled Qu
 
 [Plugin page](https://plugins.jetbrains.com/plugin/22495-mongojs-prettier-format)
 
+Compatible with **DataGrip 2025.1+** (and other IDEs that bundle Database Tools on the 251+ platform).
+
 ## What it does
 
 In a MongoDB / MongoJS Console:
@@ -62,6 +64,19 @@ Gradle packages a host-platform sidecar under `build/generated/sidecar-resources
 ```bash
 SIDECAR_TARGETS=windows-x64,linux-x64,linux-aarch64,macos-x64,macos-aarch64 ./gradlew buildPlugin
 ```
+
+## Releasing
+
+Use **Actions → Release → Run workflow**, enter the SemVer (for example `2.0.1`), and optionally mark it as a prerelease.
+
+That workflow will:
+
+1. run sidecar/Kotlin tests and Plugin Verifier
+2. build + sign the plugin zip
+3. publish to JetBrains Marketplace (`PUBLISH_TOKEN` + signing secrets)
+4. create a GitHub Release `v<version>` with the zip attached
+
+Marketplace channel comes from the version label: `2.0.1` → default, `2.1.0-beta.1` → `beta`.
 
 Sidecar tests (QuickJS + Prettier) can also be run directly:
 

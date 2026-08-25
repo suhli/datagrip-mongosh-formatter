@@ -43,14 +43,6 @@ class MongoJsFormattingService @JvmOverloads constructor(
 
     override fun getTimeout(): Duration = Duration.ofSeconds(45)
 
-    override fun prepareForFormatting(
-        document: com.intellij.openapi.editor.Document,
-        formattingContext: FormattingContext,
-    ) {
-        // Sidecar reads the document text from stdin. Saving an IO file is unnecessary
-        // and would be wrong for unsaved Mongo consoles.
-    }
-
     override fun createFormattingTask(formattingRequest: AsyncFormattingRequest): FormattingTask {
         return MongoJsFormattingTask(formattingRequest, backend)
     }

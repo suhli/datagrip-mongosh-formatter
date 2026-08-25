@@ -1,3 +1,4 @@
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -113,6 +114,7 @@ sourceSets {
 }
 
 intellijPlatform {
+    buildSearchableOptions = false
     pluginConfiguration {
         version = properties("pluginVersion")
         ideaVersion {
@@ -127,6 +129,16 @@ intellijPlatform {
     }
     publishing {
         token = providers.environmentVariable("PUBLISH_TOKEN")
+        // 2.0.1 -> default; 2.0.1-beta.1 -> beta
+        channels = properties("pluginVersion").map { version ->
+            listOf(version.substringAfter('-', "default").substringBefore('.').ifEmpty { "default" })
+        }
+    }
+    pluginVerification {
+        ides {
+            create(IntelliJPlatformType.DataGrip, "2025.1")
+            create(IntelliJPlatformType.IntellijIdeaUltimate, properties("platformVersion"))
+        }
     }
 }
 
@@ -143,6 +155,14 @@ tasks {
             "sidecar.dir",
             generatedSidecar.get().dir("sidecar/${hostSidecarResourceDir()}").asFile.absolutePath,
         )
+    }
+    named<JavaExec>("runIde") {
+        // Cursor / VS Code: ./gradlew runIde -PdebugIde=true
+        if (project.hasProperty("debugIde")) {
+            jvmArgs(
+                "-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:5005",
+            )
+        }
     }
     buildSearchableOptions {
         enabled = false

@@ -36,8 +36,10 @@ bin/
 /nbdist/
 /.nb-gradle/
 
-### VS Code ###
-.vscode/
+### VS Code / Cursor ###
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 
 ### Mac OS ###
 .DS_Store

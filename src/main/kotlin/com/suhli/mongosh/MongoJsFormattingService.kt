@@ -6,6 +6,7 @@ import com.intellij.formatting.service.AsyncFormattingRequest
 import com.intellij.formatting.service.FormattingService
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.PathManager
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.EditorFactory
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -131,20 +132,24 @@ class MongoJsFormattingService @JvmOverloads constructor(
         }
 
         private fun currentCaret(context: FormattingContext): CaretSnapshot? {
-            val file = context.containingFile
-            val document = PsiDocumentManager.getInstance(file.project).getDocument(file)
-                ?: FileDocumentManager.getInstance().getDocument(context.virtualFile ?: return null)
-                ?: return null
-            val editor = EditorFactory.getInstance().getEditors(document, file.project).firstOrNull()
-                ?: EditorFactory.getInstance().getEditors(document).firstOrNull()
-                ?: return null
-            val caret = editor.caretModel.currentCaret
-            return CaretSnapshot(
-                offset = caret.offset,
-                hasSelection = caret.hasSelection(),
-                selectionStart = caret.selectionStart,
-                selectionEnd = caret.selectionEnd,
-            )
+            // AsyncDocumentFormattingService runs on a pooled thread; caret/document
+            // reads require an explicit read action (see jb.gg/ij-platform-threading).
+            return ReadAction.compute<CaretSnapshot?, RuntimeException> {
+                val file = context.containingFile
+                val document = PsiDocumentManager.getInstance(file.project).getDocument(file)
+                    ?: FileDocumentManager.getInstance().getDocument(context.virtualFile ?: return@compute null)
+                    ?: return@compute null
+                val editor = EditorFactory.getInstance().getEditors(document, file.project).firstOrNull()
+                    ?: EditorFactory.getInstance().getEditors(document).firstOrNull()
+                    ?: return@compute null
+                val caret = editor.caretModel.currentCaret
+                CaretSnapshot(
+                    offset = caret.offset,
+                    hasSelection = caret.hasSelection(),
+                    selectionStart = caret.selectionStart,
+                    selectionEnd = caret.selectionEnd,
+                )
+            }
         }
 
         private fun restoreCaret(context: FormattingContext, mappedOffset: Int?, original: CaretSnapshot?) {

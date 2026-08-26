@@ -43,12 +43,35 @@ class QuickJsSidecarBackendTest {
             FormatRequest(
                 source = source,
                 rangeStart = 20,
-                rangeEnd = 43,
+                rangeEnd = 44,
                 cursorOffset = 32,
             ),
         ) as FormatResult.Success
-        assertTrue(result.formatted.contains("db.keep.find({z:9})"))
+        assertTrue(result.formatted.startsWith("db.keep.find({z:9})\n"))
         assertTrue(result.formatted.contains("db.users.find"))
+        assertTrue(result.formatted != source)
+    }
+
+    @Test
+    fun `nested object selection does not format siblings`() {
+        val backend = liveBackend()
+        val selected =
+            "{\n                        \$cond: [{ \$lte: [\"\$lastLogoutMs\", cut24] }, 1, 0],\n                        }"
+        val prefix = "db.x.aggregate([{ \$group: { h24: { \$sum: "
+        val suffix = ", }, h72: { \$sum: 1 } } }]);"
+        val source = prefix + selected + suffix
+        val result = backend.format(
+            FormatRequest(
+                source = source,
+                rangeStart = prefix.length,
+                rangeEnd = prefix.length + selected.length,
+                cursorOffset = prefix.length + 2,
+            ),
+        ) as FormatResult.Success
+        assertTrue(result.formatted.startsWith(prefix))
+        assertTrue(result.formatted.contains("h72: { \$sum: 1 }"))
+        assertTrue(result.formatted.contains(", }, h72: { \$sum: 1 } } }]);"))
+        assertTrue(result.formatted.contains("\$cond"))
     }
 
     @Test

@@ -160,13 +160,47 @@ export const CASES = [
       protocolVersion: 1,
       source: "db.keep.find({z:9})\ndb.users.find({a:1,b:2})\n",
       rangeStart: 20,
-      rangeEnd: 43,
+      rangeEnd: 44,
       cursorOffset: 32,
     },
     check({ body }) {
       assertEq(body.ok, true, "ok");
-      assertIncludes(body.formatted, "db.keep.find({z:9})", "unselected statement stays compact");
+      assertTrue(
+        body.formatted.startsWith("db.keep.find({z:9})\n"),
+        "unselected statement stays compact",
+      );
       assertIncludes(body.formatted, "db.users.find", "selected statement formatted");
+      assertTrue(body.formatted !== "db.keep.find({z:9})\ndb.users.find({a:1,b:2})\n", "range changed");
+    },
+  },
+  {
+    name: "nested object selection does not format siblings",
+    request: (() => {
+      const selected =
+        '{\n                        $cond: [{ $lte: ["$lastLogoutMs", cut24] }, 1, 0],\n                        }';
+      const prefix = "db.x.aggregate([{ $group: { h24: { $sum: ";
+      const suffix = ", }, h72: { $sum: 1 } } }]);";
+      return {
+        protocolVersion: 1,
+        source: prefix + selected + suffix,
+        rangeStart: prefix.length,
+        rangeEnd: prefix.length + selected.length,
+        cursorOffset: prefix.length + 2,
+      };
+    })(),
+    check({ body }) {
+      assertEq(body.ok, true, "ok");
+      assertIncludes(body.formatted, "h72: { $sum: 1 }", "sibling stays compact");
+      assertTrue(
+        body.formatted.startsWith("db.x.aggregate([{ $group: { h24: { $sum: "),
+        "prefix unchanged",
+      );
+      assertIncludes(body.formatted, "$cond", "selected object kept");
+      assertIncludes(
+        body.formatted,
+        ", }, h72: { $sum: 1 } } }]);",
+        "suffix including sibling stays verbatim",
+      );
     },
   },
   {

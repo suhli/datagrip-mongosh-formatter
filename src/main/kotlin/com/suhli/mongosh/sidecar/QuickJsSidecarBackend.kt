@@ -24,8 +24,10 @@ class QuickJsSidecarBackend(
         val started = System.nanoTime()
         val outcome = client.run(spec, stdin, cancelled)
         val durationMs = (System.nanoTime() - started) / 1_000_000
-        LOG.debug(
-            "sidecar path=${spec.executable} durationMs=$durationMs inputLength=${request.source.length} exitCode=${outcome.exitCode}",
+        LOG.info(
+            "MongoJS sidecar durationMs=$durationMs exitCode=${outcome.exitCode} " +
+                "inputLength=${request.source.length} rangeStart=${request.rangeStart} rangeEnd=${request.rangeEnd} " +
+                "cursorOffset=${request.cursorOffset} cancelled=${outcome.cancelled} timedOut=${outcome.timedOut}",
         )
 
         if (outcome.cancelled) {

@@ -6,7 +6,7 @@
       "type": "shell",
       "command": "./gradlew",
       "args": [
-        "runIde",
+        "runDataGrip",
         "-PdebugIde=true",
         "--console=plain"
       ],

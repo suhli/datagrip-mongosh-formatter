@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug Plugin in IDEA",
+      "name": "Debug Plugin in DataGrip",
       "type": "java",
       "request": "attach",
       "hostName": "localhost",
@@ -11,7 +11,7 @@
       "preLaunchTask": "runIde (debug)"
     },
     {
-      "name": "Attach to runIde",
+      "name": "Attach to runDataGrip",
       "type": "java",
       "request": "attach",
       "hostName": "localhost",

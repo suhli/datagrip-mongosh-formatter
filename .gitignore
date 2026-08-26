@@ -41,6 +41,9 @@ bin/
 !.vscode/launch.json
 !.vscode/tasks.json
 
+### Local secrets / machine paths ###
+.env
+
 ### Mac OS ###
 .DS_Store
 

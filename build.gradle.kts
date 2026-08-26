@@ -142,6 +142,58 @@ intellijPlatform {
     }
 }
 
+fun loadDotEnv(file: File): Map<String, String> {
+    if (!file.isFile) {
+        return emptyMap()
+    }
+    return file.readLines()
+        .asSequence()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && !it.startsWith("#") && it.contains("=") }
+        .associate { line ->
+            val idx = line.indexOf('=')
+            val key = line.substring(0, idx).trim()
+            var value = line.substring(idx + 1).trim()
+            if (
+                (value.startsWith('"') && value.endsWith('"')) ||
+                (value.startsWith('\'') && value.endsWith('\''))
+            ) {
+                value = value.substring(1, value.length - 1)
+            }
+            key to value
+        }
+}
+
+val dotenv = loadDotEnv(rootDir.resolve(".env"))
+
+fun localDataGripPath(): String? =
+    sequenceOf(
+        System.getenv("LOCAL_DATAGRIP_PATH"),
+        dotenv["LOCAL_DATAGRIP_PATH"],
+        providers.gradleProperty("localDataGripPath").orNull,
+    ).mapNotNull { it?.trim()?.takeIf(String::isNotEmpty) }.firstOrNull()
+
+val resolvedLocalDataGripPath = localDataGripPath()
+if (resolvedLocalDataGripPath != null) {
+    intellijPlatformTesting {
+        runIde {
+            // Local DataGrip: ./gradlew runDataGrip -PdebugIde=true
+            register("runDataGrip") {
+                localPath = file(resolvedLocalDataGripPath)
+            }
+        }
+    }
+}
+
+fun JavaExec.applyIdeDebugAgentIfRequested() {
+    // Cursor / VS Code: ./gradlew runDataGrip -PdebugIde=true
+    if (project.hasProperty("debugIde")) {
+        jvmArgs(
+            "-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:5005",
+        )
+    }
+}
+
 tasks {
     wrapper {
         gradleVersion = properties("gradleVersion").get()
@@ -156,12 +208,9 @@ tasks {
             generatedSidecar.get().dir("sidecar/${hostSidecarResourceDir()}").asFile.absolutePath,
         )
     }
-    named<JavaExec>("runIde") {
-        // Cursor / VS Code: ./gradlew runIde -PdebugIde=true
-        if (project.hasProperty("debugIde")) {
-            jvmArgs(
-                "-agentlib:jdwp=transport=dt_socket,server=y,suspend=y,address=*:5005",
-            )
+    withType<JavaExec>().configureEach {
+        if (name == "runIde" || name == "runDataGrip") {
+            applyIdeDebugAgentIfRequested()
         }
     }
     buildSearchableOptions {

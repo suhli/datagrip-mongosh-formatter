@@ -22,7 +22,7 @@ jobs:
           - runner: windows-latest
             target: windows-x64
             run_tests: true
-          - runner: macos-13
+          - runner: macos-15-intel
             target: macos-x64
             run_tests: true
           - runner: macos-14

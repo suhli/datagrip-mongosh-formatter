@@ -323,9 +323,10 @@ export const CASES = [
       rangeEnd: 18,
       cursorOffset: 16,
     },
-    check({ body }) {
-      assertEq(body.ok, true, "ok");
-      assertIncludes(body.formatted, "db.users.find", "keeps surrounding call");
+    check({ body, result }) {
+      assertEq(body.ok, false, "ok");
+      assertTrue(result.exitCode !== 0, "non-zero exit");
+      assertIncludes(body.error.message, "selected fragment", "clear fragment error");
     },
   },
   {

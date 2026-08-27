@@ -18,7 +18,7 @@ const DEFAULTS = {
 };
 
 /**
- * @returns {Promise<{formatted: string, cursorOffset?: number, strategy: "exact"|"range"|"document"}>}
+ * @returns {Promise<{formatted: string, cursorOffset?: number, strategy: "exact"|"document"}>}
  */
 export async function formatMongoJs(request) {
   const options = {
@@ -36,41 +36,21 @@ export async function formatMongoJs(request) {
     try {
       const exact = await formatExactSelection(request, options);
       return { ...exact, strategy: "exact" };
-    } catch {
-      // Prettier's range API expands to the enclosing AST node (expected for incomplete
-      // fragments). It must not silently rewrite the whole Mongo console buffer.
-      const rangeOptions = {
-        ...options,
-        rangeStart: request.rangeStart,
-        rangeEnd: request.rangeEnd,
-      };
-      const ranged = await formatDocument(request, rangeOptions);
-      await assertNotWholeDocumentRewrite(request, options, ranged.formatted);
-      return { ...ranged, strategy: "range" };
+    } catch (error) {
+      // Do not fall back to Prettier's rangeStart/rangeEnd — that expands to the
+      // enclosing AST node and is not the same as formatting the selected text.
+      const detail = error && error.message ? String(error.message) : String(error);
+      const err = new Error(
+        `Could not format the selected fragment as standalone JavaScript. ` +
+          `Select a complete expression or statement. (${detail})`,
+      );
+      err.cause = error;
+      throw err;
     }
   }
 
   const whole = await formatDocument(request, options);
   return { ...whole, strategy: "document" };
-}
-
-/**
- * If a ranged format yields the same text as formatting the entire document, while the
- * user only selected a fragment, treat it as an unsafe whole-document rewrite.
- */
-export async function assertNotWholeDocumentRewrite(request, options, rangedFormatted) {
-  const { source, rangeStart, rangeEnd } = request;
-  const selectionLen = rangeEnd - rangeStart;
-  if (selectionLen >= source.length * 0.9) {
-    return;
-  }
-  const { rangeStart: _rs, rangeEnd: _re, ...wholeOptions } = options;
-  const whole = await formatDocument({ ...request, rangeStart: undefined, rangeEnd: undefined }, wholeOptions);
-  if (whole.formatted === rangedFormatted) {
-    throw new Error(
-      "Range formatting expanded to the whole document; refusing to rewrite outside the selection",
-    );
-  }
 }
 
 async function formatDocument(request, options) {

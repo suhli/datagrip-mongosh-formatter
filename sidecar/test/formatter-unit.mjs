@@ -102,15 +102,21 @@ await test("exact strategy for array fragment", async () => {
   assertEq(result.formatted.slice(-suffix.length), suffix, "suffix");
 });
 
-await test("incomplete fragment falls back to range strategy", async () => {
+await test("incomplete fragment fails clearly without prettier range fallback", async () => {
   const source = "db.users.find({a:1,b:2,c:3})";
-  const result = await formatMongoJs({
-    source,
-    rangeStart: 14,
-    rangeEnd: 18, // "{a:1" — incomplete object
-  });
-  assertEq(result.strategy, "range", "strategy");
-  assertTrue(result.formatted.includes("db.users.find"), "keeps call");
+  let failed = false;
+  try {
+    await formatMongoJs({
+      source,
+      rangeStart: 14,
+      rangeEnd: 18, // "{a:1" — incomplete object
+    });
+  } catch (error) {
+    failed = true;
+    assertTrue(String(error.message).includes("selected fragment"), "clear error");
+    assertTrue(!String(error.message).includes("expanded to the whole document"), "no range-guard noise");
+  }
+  assertTrue(failed, "must reject incomplete selection");
 });
 
 await test("prefix suffix invariant under exact path", async () => {

@@ -5,11 +5,12 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.suhli.mongosh.formatter.FormatRequest
 import com.suhli.mongosh.formatter.FormatResult
+import com.suhli.mongosh.formatter.FormatSizePolicy
 import com.suhli.mongosh.formatter.FormatterOptions
 
 object SidecarProtocol {
     const val VERSION = 1
-    const val MAX_SOURCE_CHARS = 8 * 1024 * 1024
+    const val MAX_SOURCE_CHARS = FormatSizePolicy.MAX_SOURCE_CHARS
 
     private val gson = GsonBuilder().disableHtmlEscaping().create()
 

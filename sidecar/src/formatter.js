@@ -1,6 +1,7 @@
 import * as prettier from "prettier/standalone";
 import * as babelPlugin from "prettier/plugins/babel";
 import * as estreePlugin from "prettier/plugins/estree";
+import { jsExpressionAttempt } from "./jsExpressionParser.js";
 
 const DEFAULTS = {
   parser: "babel",
@@ -16,6 +17,9 @@ const DEFAULTS = {
   embeddedLanguageFormatting: "off",
 };
 
+/**
+ * @returns {Promise<{formatted: string, cursorOffset?: number, strategy: "exact"|"range"|"document"}>}
+ */
 export async function formatMongoJs(request) {
   const options = {
     ...DEFAULTS,
@@ -30,13 +34,21 @@ export async function formatMongoJs(request) {
     request.rangeStart < request.rangeEnd
   ) {
     try {
-      return await formatExactSelection(request, options);
+      const exact = await formatExactSelection(request, options);
+      return { ...exact, strategy: "exact" };
     } catch {
       options.rangeStart = request.rangeStart;
       options.rangeEnd = request.rangeEnd;
+      const ranged = await formatDocument(request, options);
+      return { ...ranged, strategy: "range" };
     }
   }
 
+  const whole = await formatDocument(request, options);
+  return { ...whole, strategy: "document" };
+}
+
+async function formatDocument(request, options) {
   if (request.cursorOffset !== undefined) {
     const result = await prettier.formatWithCursor(request.source, {
       ...options,
@@ -53,47 +65,65 @@ export async function formatMongoJs(request) {
 }
 
 /**
- * Format only the selected slice and splice it back.
- *
- * Prettier's own rangeStart/rangeEnd expand to the enclosing statement, which
- * in a Mongo console turns a nested object selection into a whole-pipeline
- * reformat. Exact-slice formatting keeps siblings untouched.
+ * Split a selection into leading whitespace / core / trailing whitespace.
+ * Whitespace includes spaces, tabs, LF, CRLF, and blank lines — never regenerated.
+ */
+export function splitSelectionBounds(source, rangeStart, rangeEnd) {
+  const selected = source.slice(rangeStart, rangeEnd);
+  const leadingMatch = selected.match(/^\s*/) || [""];
+  const leadingLength = leadingMatch[0].length;
+  const afterLeading = selected.slice(leadingLength);
+  const trailingMatch = afterLeading.match(/\s*$/) || [""];
+  const trailingLength = trailingMatch[0].length;
+  const coreStart = rangeStart + leadingLength;
+  const coreEnd = rangeEnd - trailingLength;
+  return {
+    coreStart,
+    coreEnd,
+    core: source.slice(coreStart, coreEnd),
+    leading: source.slice(rangeStart, coreStart),
+    trailing: source.slice(coreEnd, rangeEnd),
+  };
+}
+
+/**
+ * Format only the selected core and splice it back, preserving original
+ * leading/trailing whitespace of the selection verbatim.
  */
 async function formatExactSelection(request, options) {
   const { source, rangeStart, rangeEnd } = request;
-  const selected = source.slice(rangeStart, rangeEnd);
-  const core = selected.trim();
+  const bounds = splitSelectionBounds(source, rangeStart, rangeEnd);
+  const { coreStart, coreEnd, core } = bounds;
   if (!core) {
     return { formatted: source, cursorOffset: request.cursorOffset };
   }
 
-  const leading = selected.match(/^\s*/)[0];
   const innerCursor =
     request.cursorOffset !== undefined &&
-    request.cursorOffset >= rangeStart + leading.length &&
-    request.cursorOffset <= rangeStart + leading.length + core.length
-      ? request.cursorOffset - (rangeStart + leading.length)
+    request.cursorOffset >= coreStart &&
+    request.cursorOffset <= coreEnd
+      ? request.cursorOffset - coreStart
       : undefined;
 
   const fragment = await formatFragment(core, options, innerCursor);
   const eol = documentEol(source, options.endOfLine);
   const formattedLf = stripTrailingNewlines(toLf(fragment.formatted));
-  const indent = continuationIndent(source, rangeStart, options.tabWidth || 2);
-  const nextSelected = reindent(formattedLf, indent, eol);
-  const formatted = source.slice(0, rangeStart) + nextSelected + source.slice(rangeEnd);
+  const indent = continuationIndent(source, coreStart, options.tabWidth || 2);
+  const formattedCore = reindent(formattedLf, indent, eol);
+  const formatted = source.slice(0, coreStart) + formattedCore + source.slice(coreEnd);
 
   let cursorOffset = request.cursorOffset;
   if (cursorOffset !== undefined) {
-    if (cursorOffset <= rangeStart) {
-      // before the selection
-    } else if (cursorOffset >= rangeEnd) {
-      cursorOffset += nextSelected.length - selected.length;
+    if (cursorOffset <= coreStart) {
+      // before the core — offsets unchanged (leading whitespace kept)
+    } else if (cursorOffset >= coreEnd) {
+      cursorOffset += formattedCore.length - (coreEnd - coreStart);
     } else {
       const mapped =
         fragment.cursorOffset !== undefined && fragment.cursorOffset >= 0
           ? mapCursorThroughReindent(formattedLf, indent, eol, fragment.cursorOffset)
-          : nextSelected.length;
-      cursorOffset = rangeStart + mapped;
+          : formattedCore.length;
+      cursorOffset = coreStart + mapped;
     }
   }
 
@@ -107,7 +137,7 @@ async function formatFragment(core, options, innerCursor) {
     endOfLine: "lf",
   };
   const attempts = [
-    { parser: "__js_expression", text: core, cursorShift: 0, unwrap: false },
+    jsExpressionAttempt(core),
     { parser: "babel", text: `(${core})`, cursorShift: 1, unwrap: true },
     { parser: "babel", text: core, cursorShift: 0, unwrap: false },
   ];

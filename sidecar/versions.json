@@ -14,27 +14,46 @@
       },
       "linux-x64": {
         "file": "qjs-linux-x86_64",
-        "executable": "mongosh-formatter"
+        "executable": "mongosh-formatter",
+        "sha256": "c5e1b16adfa36def7ac523d6ba54edc77ef66a4dfd65d73e6eae19025f9b7b0a"
       },
       "linux-aarch64": {
         "file": "qjs-linux-aarch64",
-        "executable": "mongosh-formatter"
+        "executable": "mongosh-formatter",
+        "sha256": "5fb05fd4e81f26c0039f7166ed9af1050968a0e252c981c461a6aa3376244e6b"
       },
       "macos-x64": {
         "file": "qjs-darwin-x86_64",
-        "executable": "mongosh-formatter"
+        "executable": "mongosh-formatter",
+        "sha256": "4448991c0500dbe40c7b2f91ba39275995413aa4ee59db3b513b68350908a413"
       },
       "macos-aarch64": {
         "file": "qjs-darwin-arm64",
-        "executable": "mongosh-formatter"
+        "executable": "mongosh-formatter",
+        "sha256": "f6200e9856c45578a5d42ac873a32f3f994b421e29df9f63b452d9c7145015fc"
       }
     },
     "qjsc": {
-      "windows-x64": { "file": "qjsc-windows-x86_64.exe", "sha256": "3aed39cd46fea7aefc05970649fa154085356031a91d9c1f2dcf1b07af35ad9c" },
-      "linux-x64": { "file": "qjsc-linux-x86_64" },
-      "linux-aarch64": { "file": "qjsc-linux-aarch64" },
-      "macos-x64": { "file": "qjsc-darwin-x86_64" },
-      "macos-aarch64": { "file": "qjsc-darwin-arm64" }
+      "windows-x64": {
+        "file": "qjsc-windows-x86_64.exe",
+        "sha256": "3aed39cd46fea7aefc05970649fa154085356031a91d9c1f2dcf1b07af35ad9c"
+      },
+      "linux-x64": {
+        "file": "qjsc-linux-x86_64",
+        "sha256": "1e661195a71661f9161978243d1484efae978adfaf831e4dd26b8533ae1bec6c"
+      },
+      "linux-aarch64": {
+        "file": "qjsc-linux-aarch64",
+        "sha256": "7cdb5225eafdda2ae520c90447246f1359c05060d52a3c960981c1b406f6fa95"
+      },
+      "macos-x64": {
+        "file": "qjsc-darwin-x86_64",
+        "sha256": "8b6663dad5ac47cad7330f849bc1bcdbc56b0400300015c3af3a29af24b45d24"
+      },
+      "macos-aarch64": {
+        "file": "qjsc-darwin-arm64",
+        "sha256": "be084f4b7136e35684358ad79deca6b0dd89ca5751098f7e4e7a7664730f3f83"
+      }
     }
   }
 }

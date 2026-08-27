@@ -3,6 +3,7 @@ package com.suhli.mongosh.sidecar
 import com.intellij.openapi.diagnostic.Logger
 import com.suhli.mongosh.formatter.FormatRequest
 import com.suhli.mongosh.formatter.FormatResult
+import com.suhli.mongosh.formatter.FormatSizePolicy
 import com.suhli.mongosh.formatter.FormatterBackend
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -11,8 +12,8 @@ class QuickJsSidecarBackend(
     private val client: SidecarProcessClient,
 ) : FormatterBackend {
     override fun format(request: FormatRequest, cancelled: AtomicBoolean): FormatResult {
-        if (request.source.length > SidecarProtocol.MAX_SOURCE_CHARS) {
-            return FormatResult.Failure("Document exceeds ${SidecarProtocol.MAX_SOURCE_CHARS} characters")
+        if (FormatSizePolicy.isTooLarge(request.source.length)) {
+            return FormatResult.Failure(FormatSizePolicy.rejectMessage(request.source.length))
         }
         val spec = try {
             resolver.resolve()
@@ -21,13 +22,14 @@ class QuickJsSidecarBackend(
         }
 
         val stdin = SidecarProtocol.encode(request)
+        val timeout = FormatSizePolicy.sidecarTimeout(request.source.length)
         val started = System.nanoTime()
-        val outcome = client.run(spec, stdin, cancelled)
+        val outcome = client.run(spec, stdin, cancelled, timeout)
         val durationMs = (System.nanoTime() - started) / 1_000_000
-        LOG.info(
+        LOG.debug(
             "MongoJS sidecar durationMs=$durationMs exitCode=${outcome.exitCode} " +
                 "inputLength=${request.source.length} rangeStart=${request.rangeStart} rangeEnd=${request.rangeEnd} " +
-                "cursorOffset=${request.cursorOffset} cancelled=${outcome.cancelled} timedOut=${outcome.timedOut}",
+                "timeoutMs=${timeout.toMillis()} cancelled=${outcome.cancelled} timedOut=${outcome.timedOut}",
         )
 
         if (outcome.cancelled) {

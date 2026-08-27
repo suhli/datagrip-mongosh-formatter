@@ -22,7 +22,9 @@ class SidecarProcessClient(
         spec: SidecarLaunchSpec,
         stdin: String,
         cancelled: AtomicBoolean = AtomicBoolean(false),
+        timeoutOverride: java.time.Duration? = null,
     ): SidecarProcessResult {
+        val effectiveTimeout = timeoutOverride ?: timeout
         val command = ArrayList<String>(1 + spec.args.size)
         command.add(spec.executable.toString())
         command.addAll(spec.args)
@@ -41,7 +43,7 @@ class SidecarProcessClient(
             process.outputStream.bufferedWriter(StandardCharsets.UTF_8).use { writer ->
                 writer.write(stdin)
             }
-            val finished = waitFor(process, cancelled)
+            val finished = waitFor(process, cancelled, effectiveTimeout)
             stdoutThread.join(1_000)
             stderrThread.join(1_000)
             return SidecarProcessResult(
@@ -58,8 +60,8 @@ class SidecarProcessClient(
         }
     }
 
-    private fun waitFor(process: Process, cancelled: AtomicBoolean): Boolean {
-        val deadline = System.nanoTime() + timeout.toNanos()
+    private fun waitFor(process: Process, cancelled: AtomicBoolean, effectiveTimeout: Duration): Boolean {
+        val deadline = System.nanoTime() + effectiveTimeout.toNanos()
         while (System.nanoTime() < deadline) {
             if (cancelled.get()) {
                 process.destroyForcibly()

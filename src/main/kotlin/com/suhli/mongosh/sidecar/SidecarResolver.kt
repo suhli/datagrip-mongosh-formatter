@@ -4,22 +4,34 @@ import com.google.gson.JsonParser
 import com.intellij.openapi.diagnostic.Logger
 import java.io.InputStream
 import java.nio.channels.FileChannel
+import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermission
+import java.security.MessageDigest
+
+data class SidecarManifest(
+    val protocolVersion: Int,
+    val runtime: String,
+    val runtimeVersion: String,
+    val prettierVersion: String,
+    val mode: String,
+    val contentHash: String,
+    val requiredFiles: List<RequiredFile>,
+) {
+    data class RequiredFile(val name: String, val sha256: String)
+}
 
 class SidecarExtractor(
     private val cacheRoot: Path,
-    private val sidecarVersion: String,
     private val resourceOpener: (String) -> InputStream?,
 ) {
     fun ensureExtracted(platform: HostPlatform): Path {
-        val targetDir = cacheRoot.resolve(sidecarVersion).resolve(platform.resourceDir)
-        val stamp = targetDir.resolve(".extracted")
-        val executable = targetDir.resolve(platform.executableName)
-        if (Files.isRegularFile(stamp) && Files.isRegularFile(executable)) {
+        val manifest = loadManifest(platform)
+        val targetDir = cacheRoot.resolve(manifest.contentHash).resolve(platform.resourceDir)
+        if (isValidCache(targetDir, manifest, platform)) {
             return targetDir
         }
 
@@ -27,32 +39,65 @@ class SidecarExtractor(
         val lockFile = targetDir.resolve(".lock")
         FileChannel.open(lockFile, StandardOpenOption.CREATE, StandardOpenOption.WRITE).use { channel ->
             channel.lock().use {
-                if (Files.isRegularFile(stamp) && Files.isRegularFile(executable)) {
+                if (isValidCache(targetDir, manifest, platform)) {
                     return targetDir
                 }
-                extractFile(platform, platform.executableName, targetDir)
-                extractOptionalFile(platform, "formatter.js", targetDir)
-                extractOptionalFile(platform, "launch.json", targetDir)
+                for (required in manifest.requiredFiles) {
+                    extractFile(platform, required.name, targetDir)
+                }
                 if (platform.os != OsFamily.WINDOWS) {
                     setExecutable(targetDir.resolve(platform.executableName))
                 }
-                Files.writeString(stamp, sidecarVersion)
+                if (!isValidCache(targetDir, manifest, platform)) {
+                    throw UnsupportedPlatformException(
+                        "Sidecar cache validation failed after extract for ${platform.resourceDir}",
+                    )
+                }
+                Files.writeString(targetDir.resolve(".extracted"), manifest.contentHash)
             }
         }
-        LOG.debug("Extracted sidecar ${platform.resourceDir} version=$sidecarVersion")
+        LOG.debug(
+            "Extracted sidecar ${platform.resourceDir} mode=${manifest.mode} contentHash=${manifest.contentHash.take(12)}",
+        )
         return targetDir
+    }
+
+    fun loadManifest(platform: HostPlatform): SidecarManifest {
+        val resource = "/sidecar/${platform.resourceDir}/manifest.json"
+        val input = resourceOpener(resource)
+            ?: throw UnsupportedPlatformException("Sidecar manifest missing: $resource")
+        val text = input.use { it.readBytes().toString(StandardCharsets.UTF_8) }
+        return parseManifest(text)
+    }
+
+    private fun isValidCache(targetDir: Path, manifest: SidecarManifest, platform: HostPlatform): Boolean {
+        if (!Files.isDirectory(targetDir)) {
+            return false
+        }
+        for (required in manifest.requiredFiles) {
+            val file = targetDir.resolve(required.name)
+            if (!Files.isRegularFile(file)) {
+                return false
+            }
+            val actual = sha256(file)
+            if (!actual.equals(required.sha256, ignoreCase = true)) {
+                return false
+            }
+        }
+        val executable = targetDir.resolve(platform.executableName)
+        if (!Files.isRegularFile(executable)) {
+            return false
+        }
+        if (platform.os != OsFamily.WINDOWS && !Files.isExecutable(executable)) {
+            return false
+        }
+        return true
     }
 
     private fun extractFile(platform: HostPlatform, name: String, targetDir: Path) {
         val resource = resourcePath(platform, name)
         val input = resourceOpener(resource)
             ?: throw UnsupportedPlatformException("Sidecar resource missing: $resource")
-        input.use { stream -> extractTo(targetDir.resolve(name), stream) }
-    }
-
-    private fun extractOptionalFile(platform: HostPlatform, name: String, targetDir: Path) {
-        val resource = resourcePath(platform, name)
-        val input = resourceOpener(resource) ?: return
         input.use { stream -> extractTo(targetDir.resolve(name), stream) }
     }
 
@@ -83,8 +128,43 @@ class SidecarExtractor(
         }
     }
 
+    private fun sha256(path: Path): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        Files.newInputStream(path).use { input ->
+            val buffer = ByteArray(8192)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) {
+                    break
+                }
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
+    }
+
     companion object {
         private val LOG = Logger.getInstance(SidecarExtractor::class.java)
+
+        fun parseManifest(text: String): SidecarManifest {
+            val root = JsonParser.parseString(text).asJsonObject
+            val required = root.getAsJsonArray("requiredFiles").map { element ->
+                val obj = element.asJsonObject
+                SidecarManifest.RequiredFile(
+                    name = obj.get("name").asString,
+                    sha256 = obj.get("sha256").asString,
+                )
+            }
+            return SidecarManifest(
+                protocolVersion = root.get("protocolVersion").asInt,
+                runtime = root.get("runtime").asString,
+                runtimeVersion = root.get("runtimeVersion").asString,
+                prettierVersion = root.get("prettierVersion").asString,
+                mode = root.get("mode").asString,
+                contentHash = root.get("contentHash").asString,
+                requiredFiles = required,
+            )
+        }
     }
 }
 

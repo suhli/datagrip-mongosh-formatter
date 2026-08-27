@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,9 @@ for (const targetId of targets) {
   if (!spec) {
     throw new Error(`Unknown sidecar target: ${targetId}`);
   }
+  if (!spec.sha256) {
+    throw new Error(`Missing required sha256 for binary ${targetId}`);
+  }
   const url = `${versions.quickjs.releaseBaseUrl}/${spec.file}`;
   const downloadPath = path.join(cacheDir, spec.file);
   await downloadPinned(url, downloadPath, spec.sha256);
@@ -43,8 +46,9 @@ for (const targetId of targets) {
       // Windows hosts cannot always persist POSIX executable bits.
     }
   }
-  await copyFile(bundlePath, path.join(targetDir, "formatter.js"));
+
   let mode = "interpreter";
+  let includeFormatterJs = true;
 
   if (targetId === HOST.id) {
     const hostPath = path.join(cacheDir, spec.executable);
@@ -58,25 +62,51 @@ for (const targetId of targets) {
     });
     if (compiled) {
       mode = "compiled";
+      includeFormatterJs = false;
     }
   }
 
-  await writeFile(
-    path.join(targetDir, "launch.json"),
-    `${JSON.stringify(
-      {
-        mode,
-        protocolVersion: versions.protocolVersion,
-        quickjs: versions.quickjs.version,
-        prettier: versions.prettier,
-        args: mode === "interpreter" ? ["formatter.js"] : [],
-      },
-      null,
-      2,
-    )}\n`,
-  );
+  if (includeFormatterJs) {
+    await copyFile(bundlePath, path.join(targetDir, "formatter.js"));
+  } else if (existsSync(path.join(targetDir, "formatter.js"))) {
+    await unlink(path.join(targetDir, "formatter.js"));
+  }
 
-  console.log(`Packaged ${targetId} (${mode}) -> ${executablePath}`);
+  const launch = {
+    mode,
+    protocolVersion: versions.protocolVersion,
+    runtime: versions.quickjs.distribution,
+    runtimeVersion: versions.quickjs.version,
+    prettierVersion: versions.prettier,
+    args: mode === "interpreter" ? ["formatter.js"] : [],
+  };
+  await writeFile(path.join(targetDir, "launch.json"), `${JSON.stringify(launch, null, 2)}\n`);
+
+  const requiredFiles = [];
+  for (const name of [spec.executable, ...(includeFormatterJs ? ["formatter.js"] : []), "launch.json"]) {
+    const bytes = await readFile(path.join(targetDir, name));
+    requiredFiles.push({
+      name,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    });
+  }
+  requiredFiles.sort((a, b) => a.name.localeCompare(b.name));
+  const contentHash = createHash("sha256")
+    .update(requiredFiles.map((file) => `${file.name}:${file.sha256}`).join("\n"))
+    .digest("hex");
+
+  const manifest = {
+    protocolVersion: versions.protocolVersion,
+    runtime: versions.quickjs.distribution,
+    runtimeVersion: versions.quickjs.version,
+    prettierVersion: versions.prettier,
+    mode,
+    contentHash,
+    requiredFiles,
+  };
+  await writeFile(path.join(targetDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+
+  console.log(`Packaged ${targetId} (${mode}) contentHash=${contentHash.slice(0, 12)} -> ${executablePath}`);
 }
 
 async function maybeCompileWithQjsc({ targetId, executablePath }) {
@@ -85,13 +115,13 @@ async function maybeCompileWithQjsc({ targetId, executablePath }) {
     return false;
   }
   const qjscFile = typeof qjscSpec === "string" ? qjscSpec : qjscSpec.file;
+  const qjscSha = typeof qjscSpec === "object" ? qjscSpec.sha256 : undefined;
+  if (!qjscSha) {
+    throw new Error(`Missing required sha256 for qjsc ${targetId}`);
+  }
   const qjscPath = path.join(cacheDir, qjscFile);
   try {
-    await downloadPinned(
-      `${versions.quickjs.releaseBaseUrl}/${qjscFile}`,
-      qjscPath,
-      typeof qjscSpec === "object" ? qjscSpec.sha256 : undefined,
-    );
+    await downloadPinned(`${versions.quickjs.releaseBaseUrl}/${qjscFile}`, qjscPath, qjscSha);
     if (process.platform !== "win32") {
       await chmod(qjscPath, 0o755);
     }
@@ -152,13 +182,14 @@ function detectHost() {
 }
 
 async function downloadPinned(url, destination, expectedSha256) {
+  if (!expectedSha256) {
+    throw new Error(`SHA256 is required for download: ${url}`);
+  }
   if (existsSync(destination)) {
-    if (expectedSha256) {
-      const existing = await readFile(destination);
-      const actual = createHash("sha256").update(existing).digest("hex");
-      if (actual !== expectedSha256) {
-        throw new Error(`Checksum mismatch for ${destination}: ${actual} != ${expectedSha256}`);
-      }
+    const existing = await readFile(destination);
+    const actual = createHash("sha256").update(existing).digest("hex");
+    if (actual !== expectedSha256) {
+      throw new Error(`Checksum mismatch for ${destination}: ${actual} != ${expectedSha256}`);
     }
     return;
   }
@@ -168,7 +199,7 @@ async function downloadPinned(url, destination, expectedSha256) {
   }
   const bytes = Buffer.from(await response.arrayBuffer());
   const sha256 = createHash("sha256").update(bytes).digest("hex");
-  if (expectedSha256 && sha256 !== expectedSha256) {
+  if (sha256 !== expectedSha256) {
     throw new Error(`Checksum mismatch for ${url}: ${sha256} != ${expectedSha256}`);
   }
   await writeFile(destination, bytes);

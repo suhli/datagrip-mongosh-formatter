@@ -1,5 +1,8 @@
 export const PROTOCOL_VERSION = 1;
-export const MAX_SOURCE_CHARS = 8 * 1024 * 1024;
+/** Hard reject above this size — do not wait for a timeout. */
+export const MAX_SOURCE_CHARS = 512 * 1024;
+/** Inputs at or below this size use the base sidecar timeout. */
+export const SAFE_SOURCE_CHARS = 256 * 1024;
 
 export const EXIT_SUCCESS = 0;
 export const EXIT_FORMAT_ERROR = 1;
@@ -47,7 +50,8 @@ export function parseRequest(raw) {
   }
 
   if (parsed.source.length > MAX_SOURCE_CHARS) {
-    return invalid(`Request.source exceeds ${MAX_SOURCE_CHARS} characters`);
+    const kb = Math.round(parsed.source.length / 1024);
+    return invalid(`MongoJS formatting skipped: document is too large (${kb} KB).`);
   }
 
   const rangeStart = optionalOffset(parsed.rangeStart, "rangeStart");

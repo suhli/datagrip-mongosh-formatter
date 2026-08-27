@@ -2,6 +2,7 @@ package com.suhli.mongosh.sidecar
 
 import com.suhli.mongosh.formatter.FormatRequest
 import com.suhli.mongosh.formatter.FormatResult
+import com.suhli.mongosh.formatter.FormatSizePolicy
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -105,6 +106,48 @@ class QuickJsSidecarBackendTest {
             ),
         ) as FormatResult.Success
         assertTrue(result.formatted.contains("\r\n"))
+    }
+
+    @Test
+    fun `exact selection keeps trailing newline between siblings`() {
+        val backend = liveBackend()
+        val line = "db.a.find({a:1})"
+        val source = "$line\ndb.b.find({b:2})"
+        val result = backend.format(
+            FormatRequest(
+                source = source,
+                rangeStart = 0,
+                rangeEnd = line.length + 1,
+            ),
+        ) as FormatResult.Success
+        assertTrue(result.formatted.contains("\ndb.b.find({b:2})"))
+        assertTrue(!result.formatted.contains("});db.b"))
+    }
+
+    @Test
+    fun `exact selection keeps leading indentation`() {
+        val backend = liveBackend()
+        val selected = "  db.a.find({a:1})"
+        val source = "function x() {\n$selected\n}"
+        val start = source.indexOf(selected)
+        val result = backend.format(
+            FormatRequest(
+                source = source,
+                rangeStart = start,
+                rangeEnd = start + selected.length,
+            ),
+        ) as FormatResult.Success
+        assertTrue(result.formatted.contains("\n  db.a.find("))
+        assertTrue(result.formatted.startsWith("function x() {\n"))
+        assertTrue(result.formatted.endsWith("\n}"))
+    }
+
+    @Test
+    fun `too large documents are rejected without formatting`() {
+        val backend = liveBackend()
+        val source = "const x=\"${"a".repeat(FormatSizePolicy.MAX_SOURCE_CHARS + 1)}\";"
+        val result = backend.format(FormatRequest(source = source)) as FormatResult.Failure
+        assertTrue(result.message.contains("too large"))
     }
 
     private fun liveBackend(): QuickJsSidecarBackend {

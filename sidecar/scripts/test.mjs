@@ -125,7 +125,7 @@ const sizes = [
   { name: "small query", source: "db.users.find({a:1,b:2})" },
   { name: "10 KB", source: `${benchSource}\n`.repeat(Math.ceil(10_000 / benchSource.length)) },
   { name: "100 KB", source: `${benchSource}\n`.repeat(Math.ceil(100_000 / benchSource.length)) },
-  { name: "1 MB", source: `${benchSource}\n`.repeat(Math.ceil(1_000_000 / benchSource.length)) },
+  { name: "256 KB", source: `${benchSource}\n`.repeat(Math.ceil(256_000 / benchSource.length)) },
 ];
 
 await mkdir(path.join(distDir, "bench"), { recursive: true });

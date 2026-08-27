@@ -6,7 +6,6 @@ import com.intellij.formatting.service.AsyncFormattingRequest
 import com.intellij.formatting.service.FormattingService
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.PathManager
-import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
@@ -16,22 +15,24 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.psi.PsiDocumentManager
 import com.intellij.psi.PsiFile
+import com.suhli.mongosh.formatter.CaretRestorePolicy
+import com.suhli.mongosh.formatter.CaretSnapshot
 import com.suhli.mongosh.formatter.DocumentUpdatePolicy
 import com.suhli.mongosh.formatter.FormatRangeResolver
 import com.suhli.mongosh.formatter.FormatRequest
 import com.suhli.mongosh.formatter.FormatResult
+import com.suhli.mongosh.formatter.FormatSizePolicy
 import com.suhli.mongosh.formatter.FormatterBackend
+import com.suhli.mongosh.formatter.TargetEditorResolver
 import com.suhli.mongosh.settings.MongoJsFormatterSettings
 import com.suhli.mongosh.sidecar.QuickJsSidecarBackend
 import com.suhli.mongosh.sidecar.SidecarExtractor
 import com.suhli.mongosh.sidecar.SidecarProcessClient
 import com.suhli.mongosh.sidecar.SidecarResolver
 import java.nio.file.Path
-import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
-import kotlin.math.max
-import kotlin.math.min
+import java.util.concurrent.atomic.AtomicReference
 
 class MongoJsFormattingService @JvmOverloads constructor(
     private val backend: FormatterBackend = createDefaultBackend(),
@@ -46,7 +47,7 @@ class MongoJsFormattingService @JvmOverloads constructor(
 
     override fun canFormat(file: PsiFile): Boolean = MongoJsFileSupport.isMongoJs(file)
 
-    override fun getTimeout(): Duration = Duration.ofSeconds(45)
+    override fun getTimeout() = FormatSizePolicy.FORMATTER_TIMEOUT
 
     override fun createFormattingTask(formattingRequest: AsyncFormattingRequest): FormattingTask {
         return MongoJsFormattingTask(formattingRequest, backend)
@@ -54,19 +55,17 @@ class MongoJsFormattingService @JvmOverloads constructor(
 
     companion object {
         const val NOTIFICATION_GROUP_ID = "MongoJS Format"
-        const val SIDECAR_VERSION = "2.0.1-exact-selection-prettier-3.9.6-qjs-0.16.2"
         private val LOG = Logger.getInstance(MongoJsFormattingService::class.java)
         private val REQUEST_SEQ = AtomicInteger()
 
         fun createDefaultBackend(): FormatterBackend {
             val extractor = SidecarExtractor(
                 cacheRoot = Path.of(PathManager.getSystemPath(), "mongojs-formatter"),
-                sidecarVersion = SIDECAR_VERSION,
                 resourceOpener = { path -> MongoJsFormattingService::class.java.getResourceAsStream(path) },
             )
             return QuickJsSidecarBackend(
                 resolver = SidecarResolver(extractor),
-                client = SidecarProcessClient(timeout = Duration.ofSeconds(40)),
+                client = SidecarProcessClient(),
             )
         }
     }
@@ -77,11 +76,8 @@ class MongoJsFormattingService @JvmOverloads constructor(
     ) : FormattingTask {
         private val cancelled = AtomicBoolean(false)
         private val requestId = REQUEST_SEQ.incrementAndGet()
-        private val caretAtCreate = snapshotCaret("createTask")
-
-        init {
-            logPlatform("createTask")
-        }
+        private val targetEditorRef = AtomicReference<Editor?>(null)
+        private val caretAtCreate = snapshotCaret()
 
         override fun isRunUnderProgress(): Boolean = true
 
@@ -96,8 +92,11 @@ class MongoJsFormattingService @JvmOverloads constructor(
                     return
                 }
                 val source = request.documentText
-                val caretAtRun = snapshotCaret("run")
-                logPlatform("run")
+                if (FormatSizePolicy.isTooLarge(source.length)) {
+                    request.onError("MongoJS Formatter", FormatSizePolicy.rejectMessage(source.length), -1)
+                    return
+                }
+                val caretAtRun = snapshotCaret()
                 val caret = caretAtCreate?.takeIf { it.hasSelection } ?: caretAtRun
                 val selection = caret?.takeIf { it.hasSelection }
                 val fragment = FormatRangeResolver.resolve(
@@ -106,32 +105,20 @@ class MongoJsFormattingService @JvmOverloads constructor(
                     selectionStart = selection?.selectionStart,
                     selectionEnd = selection?.selectionEnd,
                 )
-                val rangeSource = when {
-                    caretAtCreate?.hasSelection == true -> "caretAtCreate"
-                    caretAtRun?.hasSelection == true -> "caretAtRun"
-                    fragment != null -> "platformRanges"
-                    else -> "wholeDocument"
-                }
-                LOG.info(
-                    "MongoJS format #$requestId resolved range=${fragment ?: "whole-document"} " +
-                        "rangeSource=$rangeSource caretCreate=${describeCaret(caretAtCreate)} " +
-                        "caretRun=${describeCaret(caretAtRun)}",
+                LOG.debug(
+                    "MongoJS format #$requestId range=${fragment ?: "whole-document"} " +
+                        "sourceLength=${source.length} hasSelection=${selection != null}",
                 )
                 val formatRequest = FormatRequest(
                     source = source,
                     rangeStart = fragment?.first,
                     rangeEnd = fragment?.second,
-                    cursorOffset = caret?.offset,
+                    cursorOffset = caret?.caretOffset,
                     options = MongoJsFormatterSettings.getInstance().toFormatterOptions(),
-                )
-                LOG.info(
-                    "MongoJS format #$requestId sidecar request rangeStart=${formatRequest.rangeStart} " +
-                        "rangeEnd=${formatRequest.rangeEnd} cursorOffset=${formatRequest.cursorOffset} " +
-                        "sourceLength=${source.length}",
                 )
                 val result = backend.format(formatRequest, cancelled)
                 if (result is FormatResult.Failure) {
-                    LOG.info("MongoJS format #$requestId sidecar failure: ${result.message}")
+                    LOG.debug("MongoJS format #$requestId failure: ${result.message}")
                     request.onError("MongoJS Formatter", result.message, errorOffset(result))
                     return
                 }
@@ -140,10 +127,6 @@ class MongoJsFormattingService @JvmOverloads constructor(
                 }
                 val nextText = DocumentUpdatePolicy.nextText(source, result)
                 val success = result as FormatResult.Success
-                LOG.info(
-                    "MongoJS format #$requestId sidecar success formattedLength=${success.formatted.length} " +
-                        "changed=${nextText != null} cursorOffset=${success.cursorOffset}",
-                )
                 request.onTextReady(nextText)
                 if (nextText != null) {
                     restoreCaret(request.context, success.cursorOffset, caret)
@@ -170,124 +153,98 @@ class MongoJsFormattingService @JvmOverloads constructor(
             }.distinct()
         }
 
-        private fun logPlatform(phase: String) {
-            val file = request.context.containingFile
-            val languages = file.viewProvider.languages.joinToString { it.id }
-            val ranges = request.formattingRanges.joinToString { "${it.startOffset}-${it.endOffset}" }
-            val contextRange = request.context.formattingRange
-            LOG.info(
-                "MongoJS format #$requestId [$phase] edt=${ApplicationManager.getApplication().isDispatchThread} " +
-                    "file=${file.name} vf=${request.context.virtualFile?.path} lang=${file.language.id} " +
-                    "langs=[$languages] sourceLength=${request.documentText.length} " +
-                    "formattingRanges=[$ranges] contextRange=${contextRange.startOffset}-${contextRange.endOffset}",
-            )
-        }
-
-        private fun snapshotCaret(phase: String): CaretSnapshot? {
-            return ReadAction.compute<CaretSnapshot?, RuntimeException> {
+        private fun snapshotCaret(): CaretSnapshot? {
+            return ApplicationManager.getApplication().runReadAction<CaretSnapshot?> {
                 val file = request.context.containingFile
                 val document = PsiDocumentManager.getInstance(file.project).getDocument(file)
-                    ?: FileDocumentManager.getInstance().getDocument(request.context.virtualFile ?: return@compute null)
-                    ?: return@compute null
-                val editors = collectEditors(file, document)
+                    ?: FileDocumentManager.getInstance().getDocument(request.context.virtualFile ?: return@runReadAction null)
+                    ?: return@runReadAction null
                 val selected = FileEditorManager.getInstance(file.project).selectedTextEditor
-                LOG.info(
-                    "MongoJS format #$requestId [$phase] psiDoc=#${System.identityHashCode(document)} " +
-                        "psiLen=${document.textLength} editorCount=${editors.size} " +
-                        "selected=${describeEditor(selected, document)}",
-                )
-                for (editor in editors) {
-                    LOG.info(
-                        "MongoJS format #$requestId [$phase] ${describeEditor(editor, document)} " +
-                            "snippet='${snippet(editor.document.text, editor.selectionModel.selectionStart, editor.selectionModel.selectionEnd)}'",
+                    ?.takeIf { it.document === document }
+                val editors = collectEditorsForDocument(file, document)
+                val refs = editors.map { editor ->
+                    TargetEditorResolver.EditorRef(
+                        id = editor,
+                        documentId = editor.document,
+                        textLength = editor.document.textLength,
+                        hasSelection = editor.selectionModel.hasSelection(),
+                        isSelectedTextEditor = editor === selected,
                     )
                 }
-                pickCaret(editors, selected, document)
+                val targetId = TargetEditorResolver.resolve(document, refs)
+                val target = editors.firstOrNull { it === targetId || it == targetId }
+                if (target != null) {
+                    targetEditorRef.compareAndSet(null, target)
+                }
+                target?.let { snapshotFrom(it) }
             }
         }
 
-        private fun collectEditors(file: PsiFile, document: Document): List<Editor> {
+        private fun collectEditorsForDocument(file: PsiFile, document: Document): List<Editor> {
             val factory = EditorFactory.getInstance()
             val found = LinkedHashSet<Editor>()
-            found.addAll(factory.getEditors(document, file.project))
-            found.addAll(factory.getEditors(document))
-            FileEditorManager.getInstance(file.project).selectedTextEditor?.let { found.add(it) }
-            if (found.none { it.selectionModel.hasSelection() }) {
-                factory.allEditors.filterTo(found) { editor ->
-                    editor.document.textLength == document.textLength && editor.selectionModel.hasSelection()
-                }
-            }
+            factory.getEditors(document, file.project).filterTo(found) { it.document === document }
+            factory.getEditors(document).filterTo(found) { it.document === document }
+            FileEditorManager.getInstance(file.project).selectedTextEditor
+                ?.takeIf { it.document === document }
+                ?.let { found.add(it) }
             return found.toList()
         }
 
-        private fun pickCaret(editors: List<Editor>, selected: Editor?, document: Document): CaretSnapshot? {
-            val preferred = editors.firstOrNull { it.selectionModel.hasSelection() && it.document === document }
-                ?: selected?.takeIf { it.selectionModel.hasSelection() }
-                ?: editors.firstOrNull { it.selectionModel.hasSelection() }
-                ?: editors.firstOrNull { it.document === document }
-                ?: selected
-                ?: editors.firstOrNull()
-            return preferred?.let { snapshotFrom(it) }
-        }
-
         private fun snapshotFrom(editor: Editor): CaretSnapshot {
+            val selection = editor.selectionModel
             val caret = editor.caretModel.currentCaret
+            val hasSelection = selection.hasSelection()
+            val start = selection.selectionStart
+            val end = selection.selectionEnd
+            val lead = if (hasSelection) selection.leadSelectionOffset else caret.offset
+            val anchor = when {
+                !hasSelection -> caret.offset
+                lead == start -> end
+                else -> start
+            }
             return CaretSnapshot(
-                offset = caret.offset,
-                hasSelection = caret.hasSelection(),
-                selectionStart = caret.selectionStart,
-                selectionEnd = caret.selectionEnd,
+                targetEditorId = editor,
+                caretOffset = caret.offset,
+                hasSelection = hasSelection,
+                selectionStart = start,
+                selectionEnd = end,
+                selectionAnchor = anchor,
             )
         }
 
-        private fun describeCaret(caret: CaretSnapshot?): String {
-            if (caret == null) {
-                return "none"
-            }
-            return "offset=${caret.offset} hasSelection=${caret.hasSelection} " +
-                "sel=${caret.selectionStart}-${caret.selectionEnd}"
-        }
-
-        private fun describeEditor(editor: Editor?, document: Document): String {
-            if (editor == null) {
-                return "null"
-            }
-            val selection = editor.selectionModel
-            return "editor=${editor.javaClass.simpleName} doc=#${System.identityHashCode(editor.document)} " +
-                "docMatch=${editor.document === document} len=${editor.document.textLength} " +
-                "offset=${editor.caretModel.offset} hasSelection=${selection.hasSelection()} " +
-                "sel=${selection.selectionStart}-${selection.selectionEnd}"
-        }
-
-        private fun snippet(text: String, start: Int, end: Int): String {
-            if (start >= end) {
-                return ""
-            }
-            val lo = start.coerceIn(0, text.length)
-            val hi = end.coerceIn(0, text.length)
-            val raw = text.substring(lo, hi).replace("\r", "\\r").replace("\n", "\\n")
-            return if (raw.length <= 80) raw else raw.take(80) + "..."
-        }
-
         private fun restoreCaret(context: FormattingContext, mappedOffset: Int?, original: CaretSnapshot?) {
-            if (mappedOffset == null && original == null) {
+            if (original == null && mappedOffset == null) {
                 return
             }
             ApplicationManager.getApplication().invokeLater {
                 val file = context.containingFile
                 val document = PsiDocumentManager.getInstance(file.project).getDocument(file) ?: return@invokeLater
-                val editors = EditorFactory.getInstance().getEditors(document, file.project)
-                    .ifEmpty { EditorFactory.getInstance().getEditors(document) }
                 val length = document.textLength
-                for (editor in editors) {
-                    val caretOffset = (mappedOffset ?: original?.offset ?: 0).coerceIn(0, length)
-                    if (original?.hasSelection == true) {
-                        val start = original.selectionStart.coerceIn(0, length)
-                        editor.selectionModel.setSelection(min(start, caretOffset), max(start, caretOffset))
-                    }
-                    editor.caretModel.moveToOffset(caretOffset)
+                val target = resolveTargetEditor(original) ?: return@invokeLater
+                if (target.isDisposed || target.document !== document) {
+                    return@invokeLater
+                }
+                val restored = CaretRestorePolicy.plan(original, mappedOffset, length) ?: return@invokeLater
+                if (restored.hasSelection) {
+                    target.selectionModel.setSelection(restored.anchorOffset, restored.leadOffset)
+                } else {
+                    target.selectionModel.removeSelection()
+                    target.caretModel.moveToOffset(restored.caretOffset)
                 }
             }
+        }
+
+        private fun resolveTargetEditor(original: CaretSnapshot?): Editor? {
+            val held = targetEditorRef.get()
+            if (held != null && !held.isDisposed) {
+                return held
+            }
+            val fromSnapshot = original?.targetEditorId as? Editor
+            if (fromSnapshot != null && !fromSnapshot.isDisposed) {
+                return fromSnapshot
+            }
+            return null
         }
 
         private fun errorOffset(result: FormatResult.Failure): Int {
@@ -305,11 +262,4 @@ class MongoJsFormattingService @JvmOverloads constructor(
             return (index + (column - 1).coerceAtLeast(0)).coerceIn(0, documentText.length)
         }
     }
-
-    private data class CaretSnapshot(
-        val offset: Int,
-        val hasSelection: Boolean,
-        val selectionStart: Int,
-        val selectionEnd: Int,
-    )
 }

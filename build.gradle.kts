@@ -83,6 +83,7 @@ tasks.register<Exec>("buildSidecarBundle") {
 
 tasks.register<Exec>("packageSidecar") {
     dependsOn("buildSidecarBundle")
+    onlyIf { System.getenv("SIDECAR_SKIP_PACKAGE") != "1" }
     workingDir = sidecarDir
     environment("SIDECAR_OUTPUT_DIR", generatedSidecar.get().dir("sidecar").asFile.absolutePath)
     val targets = System.getenv("SIDECAR_TARGETS")
@@ -95,8 +96,24 @@ tasks.register<Exec>("packageSidecar") {
     outputs.dir(generatedSidecar)
 }
 
+tasks.register("verifyPrebuiltSidecar") {
+    onlyIf { System.getenv("SIDECAR_SKIP_PACKAGE") == "1" }
+    doLast {
+        val root = generatedSidecar.get().dir("sidecar").asFile
+        val required = System.getenv("SIDECAR_TARGETS")
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotEmpty() }
+            ?: listOf(hostSidecarResourceDir())
+        for (target in required) {
+            val manifest = root.resolve("$target/manifest.json")
+            require(manifest.isFile) { "Prebuilt sidecar missing manifest: ${manifest.absolutePath}" }
+        }
+    }
+}
+
 tasks.register<Exec>("sidecarTest") {
-    dependsOn("packageSidecar")
+    dependsOn("npmSidecarInstall", "packageSidecar", "verifyPrebuiltSidecar")
     workingDir = sidecarDir
     environment(
         "SIDECAR_DIR",
@@ -137,6 +154,8 @@ intellijPlatform {
     pluginVerification {
         ides {
             create(IntelliJPlatformType.DataGrip, "2025.1")
+            create(IntelliJPlatformType.DataGrip, "2026.1")
+            create(IntelliJPlatformType.DataGrip, "2026.2")
             create(IntelliJPlatformType.IntellijIdeaUltimate, properties("platformVersion"))
         }
     }
@@ -199,10 +218,10 @@ tasks {
         gradleVersion = properties("gradleVersion").get()
     }
     named("processResources") {
-        dependsOn("packageSidecar")
+        dependsOn("packageSidecar", "verifyPrebuiltSidecar")
     }
     test {
-        dependsOn("packageSidecar")
+        dependsOn("packageSidecar", "verifyPrebuiltSidecar")
         systemProperty(
             "sidecar.dir",
             generatedSidecar.get().dir("sidecar/${hostSidecarResourceDir()}").asFile.absolutePath,

@@ -17,13 +17,75 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  native-sidecar:
+    name: Sidecar (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: linux-x64
+            run_tests: true
+          - runner: ubuntu-latest
+            target: linux-aarch64
+            run_tests: false
+          - runner: windows-latest
+            target: windows-x64
+            run_tests: true
+          - runner: macos-13
+            target: macos-x64
+            run_tests: true
+          - runner: macos-14
+            target: macos-aarch64
+            run_tests: true
+    steps:
+      - name: Fetch Sources
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sidecar/package-lock.json
+
+      - name: Install and build sidecar bundle
+        working-directory: sidecar
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package native sidecar
+        working-directory: sidecar
+        env:
+          SIDECAR_TARGETS: ${{ matrix.target }}
+          SIDECAR_OUTPUT_DIR: ${{ github.workspace }}/artifacts/sidecar
+        run: npm run package-native
+
+      - name: Run sidecar tests
+        if: matrix.run_tests
+        working-directory: sidecar
+        env:
+          SIDECAR_DIR: ${{ github.workspace }}/artifacts/sidecar/${{ matrix.target }}
+        run: npm test
+
+      - name: Upload sidecar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidecar-${{ matrix.target }}
+          path: artifacts/sidecar/${{ matrix.target }}/**
+          if-no-files-found: error
+
   release:
-    name: Build, Release, Publish
+    name: Assemble, Release, Publish
+    needs: native-sidecar
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       PLUGIN_VERSION: ${{ inputs.version }}
+      SIDECAR_SKIP_PACKAGE: "1"
       SIDECAR_TARGETS: linux-x64,windows-x64,macos-x64,macos-aarch64,linux-aarch64
     steps:
       - name: Validate version
@@ -57,6 +119,38 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Download sidecar artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sidecar-*
+          path: build/generated/sidecar-resources/sidecar
+          merge-multiple: false
+
+      - name: Flatten sidecar artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="build/generated/sidecar-resources/sidecar"
+          for dir in "$ROOT"/sidecar-*; do
+            target="${dir##*/sidecar-}"
+            mkdir -p "$ROOT/$target"
+            if [[ -f "$dir/manifest.json" ]]; then
+              cp -a "$dir"/. "$ROOT/$target"/
+            elif [[ -f "$dir/$target/manifest.json" ]]; then
+              cp -a "$dir/$target"/. "$ROOT/$target"/
+            else
+              echo "Cannot locate manifest under $dir"
+              find "$dir" -maxdepth 3 -type f | head
+              exit 1
+            fi
+            rm -rf "$dir"
+            test -f "$ROOT/$target/manifest.json"
+          done
+
+      - name: Install sidecar npm deps for unit tests
+        working-directory: sidecar
+        run: npm ci
 
       - name: Test and verify plugin
         run: ./gradlew sidecarTest test verifyPlugin -PpluginVersion="$PLUGIN_VERSION" --console=plain
@@ -95,6 +189,9 @@ jobs:
           ### Runtime requirements
           - DataGrip 2025.1+ (or IU with Database Tools)
           - No Node.js / Prettier plugin / JavaScript plugin
+
+          ### Notes
+          - Embedded SQL formatting from the legacy 1.x implementation is currently not supported in 2.x.
 
           ### Artifacts
           Plugin zip from this release can also be installed via **Settings → Plugins → Install Plugin from Disk**.

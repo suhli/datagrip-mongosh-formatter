@@ -174,6 +174,95 @@ export const CASES = [
     },
   },
   {
+    name: "exact selection keeps trailing newline",
+    request: (() => {
+      const line = "db.a.find({a:1})";
+      const source = `${line}\ndb.b.find({b:2})`;
+      return {
+        protocolVersion: 1,
+        source,
+        rangeStart: 0,
+        rangeEnd: line.length + 1,
+      };
+    })(),
+    check({ body }) {
+      assertEq(body.ok, true, "ok");
+      assertTrue(body.formatted.includes("\ndb.b.find({b:2})"), "sibling stays on next line");
+      assertTrue(!body.formatted.includes("});db.b"), "must not glue statements");
+      assertTrue(body.formatted.startsWith("db.a.find("), "selected statement formatted");
+      assertIncludes(body.formatted, "db.b.find({b:2})", "sibling verbatim");
+    },
+  },
+  {
+    name: "exact selection keeps leading indentation",
+    request: (() => {
+      const selected = "  db.a.find({a:1})";
+      const source = `function x() {\n${selected}\n}`;
+      const rangeStart = source.indexOf(selected);
+      return {
+        protocolVersion: 1,
+        source,
+        rangeStart,
+        rangeEnd: rangeStart + selected.length,
+      };
+    })(),
+    check({ body }) {
+      assertEq(body.ok, true, "ok");
+      assertTrue(body.formatted.includes("\n  db.a.find("), "leading indent preserved");
+      assertTrue(body.formatted.startsWith("function x() {\n"), "prefix unchanged");
+      assertTrue(body.formatted.endsWith("\n}"), "suffix unchanged");
+    },
+  },
+  {
+    name: "exact selection keeps leading and trailing whitespace",
+    request: (() => {
+      const selected = "  db.a.find({a:1})\n";
+      const prefix = "db.before.find({x:1})\n";
+      const suffix = "db.after.find({y:2})";
+      const source = prefix + selected + suffix;
+      return {
+        protocolVersion: 1,
+        source,
+        rangeStart: prefix.length,
+        rangeEnd: prefix.length + selected.length,
+      };
+    })(),
+    check({ body }) {
+      assertEq(body.ok, true, "ok");
+      assertTrue(body.formatted.startsWith("db.before.find({x:1})\n"), "prefix unchanged");
+      assertTrue(body.formatted.endsWith("db.after.find({y:2})"), "suffix unchanged");
+      const mid = body.formatted.slice(
+        "db.before.find({x:1})\n".length,
+        body.formatted.length - "db.after.find({y:2})".length,
+      );
+      assertTrue(mid.startsWith("  "), "leading spaces kept");
+      assertTrue(mid.endsWith("\n"), "trailing newline kept");
+    },
+  },
+  {
+    name: "exact selection keeps trailing crlf",
+    request: (() => {
+      const selected = "db.a.find({a:1})\r\n";
+      const suffix = "db.b.find({b:2})\r\n";
+      const source = selected + suffix;
+      return {
+        protocolVersion: 1,
+        source,
+        rangeStart: 0,
+        rangeEnd: selected.length,
+        options: { endOfLine: "crlf" },
+      };
+    })(),
+    check({ body }) {
+      assertEq(body.ok, true, "ok");
+      assertTrue(body.formatted.endsWith("db.b.find({b:2})\r\n"), "suffix crlf preserved");
+      assertTrue(body.formatted.includes("\r\n"), "crlf present");
+      assertTrue(!body.formatted.includes("});db.b"), "must not glue over crlf");
+      const idx = body.formatted.indexOf("db.b.find");
+      assertTrue(body.formatted.slice(idx - 2, idx) === "\r\n", "crlf before sibling");
+    },
+  },
+  {
     name: "nested object selection does not format siblings",
     request: (() => {
       const selected =
@@ -204,13 +293,35 @@ export const CASES = [
     },
   },
   {
+    name: "prefix suffix invariant with comments blank lines unicode",
+    request: (() => {
+      const prefix = "// keep me\n\ndb.before.find({z:9})\n\n";
+      const selected = "db.users.find({name:\"中文😀\",a:1})";
+      const suffix = "\n\n/* trailing */\ndb.after.find({y:2})\n";
+      return {
+        protocolVersion: 1,
+        source: prefix + selected + suffix,
+        rangeStart: prefix.length,
+        rangeEnd: prefix.length + selected.length,
+      };
+    })(),
+    check({ body }) {
+      assertEq(body.ok, true, "ok");
+      const prefix = "// keep me\n\ndb.before.find({z:9})\n\n";
+      const suffix = "\n\n/* trailing */\ndb.after.find({y:2})\n";
+      assertTrue(body.formatted.startsWith(prefix), "prefix bytes unchanged");
+      assertTrue(body.formatted.endsWith(suffix), "suffix bytes unchanged");
+      assertIncludes(body.formatted, "中文😀", "unicode/emoji preserved");
+    },
+  },
+  {
     name: "incomplete object selection",
     request: {
       protocolVersion: 1,
       source: "db.users.find({a:1,b:2,c:3})",
       rangeStart: 14,
-      rangeEnd: 27,
-      cursorOffset: 20,
+      rangeEnd: 18,
+      cursorOffset: 16,
     },
     check({ body }) {
       assertEq(body.ok, true, "ok");
@@ -238,12 +349,12 @@ export const CASES = [
     name: "oversized input",
     request: {
       protocolVersion: 1,
-      source: `const x="${"a".repeat(8 * 1024 * 1024 + 1)}";`,
+      source: `const x="${"a".repeat(512 * 1024 + 1)}";`,
     },
     check({ body, result }) {
       assertEq(body.ok, false, "ok");
       assertEq(result.exitCode, 2, "invalid request exit");
-      assertIncludes(body.error.message, "exceeds", "size message");
+      assertIncludes(body.error.message, "too large", "size message");
     },
   },
 ];

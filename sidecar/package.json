@@ -6,7 +6,7 @@
   "description": "Build-time package for the QuickJS MongoJS formatter sidecar. Not a runtime dependency of the JetBrains plugin.",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node scripts/test.mjs",
+    "test": "node test/formatter-unit.mjs && node scripts/test.mjs",
     "package-native": "node scripts/package-native.mjs"
   },
   "dependencies": {

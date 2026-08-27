@@ -146,6 +146,10 @@ jobs:
             fi
             rm -rf "$dir"
             test -f "$ROOT/$target/manifest.json"
+            # GitHub artifact upload/download normalizes file permissions.
+            if [[ "$target" != windows-* ]]; then
+              chmod +x "$ROOT/$target/mongosh-formatter"
+            fi
             echo "staged $target"
           done
 

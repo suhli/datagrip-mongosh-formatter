@@ -33,7 +33,7 @@ jobs:
           - runner: windows-latest
             target: windows-x64
             run_tests: true
-          - runner: macos-13
+          - runner: macos-15-intel
             target: macos-x64
             run_tests: true
           - runner: macos-14
@@ -146,6 +146,10 @@ jobs:
             fi
             rm -rf "$dir"
             test -f "$ROOT/$target/manifest.json"
+            # GitHub artifact upload/download normalizes file permissions.
+            if [[ "$target" != windows-* ]]; then
+              chmod +x "$ROOT/$target/mongosh-formatter"
+            fi
           done
 
       - name: Install sidecar npm deps for unit tests

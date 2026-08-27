@@ -99,15 +99,23 @@ class MongoJsFormattingService @JvmOverloads constructor(
                 val caretAtRun = snapshotCaret()
                 val caret = caretAtCreate?.takeIf { it.hasSelection } ?: caretAtRun
                 val selection = caret?.takeIf { it.hasSelection }
+                val platform = platformRanges(request)
                 val fragment = FormatRangeResolver.resolve(
                     sourceLength = source.length,
-                    formattingRanges = platformRanges(request),
+                    formattingRanges = platform,
                     selectionStart = selection?.selectionStart,
                     selectionEnd = selection?.selectionEnd,
                 )
-                LOG.debug(
+                val rangeSource = when {
+                    selection != null -> "editor-selection"
+                    fragment != null -> "platform-ranges"
+                    else -> "whole-document"
+                }
+                LOG.info(
                     "MongoJS format #$requestId range=${fragment ?: "whole-document"} " +
-                        "sourceLength=${source.length} hasSelection=${selection != null}",
+                        "rangeSource=$rangeSource sourceLength=${source.length} " +
+                        "hasSelection=${selection != null} platformRanges=$platform " +
+                        "sel=${selection?.selectionStart}-${selection?.selectionEnd}",
                 )
                 val formatRequest = FormatRequest(
                     source = source,
@@ -118,15 +126,26 @@ class MongoJsFormattingService @JvmOverloads constructor(
                 )
                 val result = backend.format(formatRequest, cancelled)
                 if (result is FormatResult.Failure) {
-                    LOG.debug("MongoJS format #$requestId failure: ${result.message}")
+                    LOG.info("MongoJS format #$requestId failure: ${result.message}")
                     request.onError("MongoJS Formatter", result.message, errorOffset(result))
                     return
                 }
                 if (cancelled.get()) {
                     return
                 }
-                val nextText = DocumentUpdatePolicy.nextText(source, result)
+                val nextText = DocumentUpdatePolicy.nextText(
+                    original = source,
+                    result = result,
+                    rangeStart = fragment?.first,
+                    rangeEnd = fragment?.second,
+                )
                 val success = result as FormatResult.Success
+                if (nextText == null && success.formatted != source) {
+                    LOG.warn(
+                        "MongoJS format #$requestId refused apply: formatted text mutated outside " +
+                            "selection range=${fragment ?: "whole-document"}",
+                    )
+                }
                 request.onTextReady(nextText)
                 if (nextText != null) {
                     restoreCaret(request.context, success.cursorOffset, caret)
